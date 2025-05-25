@@ -1,0 +1,600 @@
+//+------------------------------------------------------------------+
+//|                                    Enhanced_MT5_Discord_Tracker.mq5 |
+//|                                                   Trade Tracker EA |
+//|                                          Sends alerts to Discord   |
+//+------------------------------------------------------------------+
+#property copyright "Enhanced Trade Tracker EA"
+#property version   "2.00"
+#property strict
+
+// Input parameters
+input string DiscordWebhookURL = ""; // Discord Webhook URL
+input bool EnableTradeAlerts = true; // Enable trade open/close alerts
+input bool EnableModifyAlerts = true; // Enable SL/TP modify alerts
+input bool EnableDailySummary = true; // Enable daily P/L summary
+input string SummaryTime = "23:59"; // Daily summary time (HH:MM)
+input bool EnableSounds = true; // Enable sound notifications
+input string BotName = "SMC Hybrid"; // Bot display name
+input bool EnableDetailedMessages = true; // Enable detailed formatting
+input int MessageRetryAttempts = 3; // Number of retry attempts for failed messages
+
+// Global variables
+datetime lastSummaryDate = 0;
+double dayStartBalance = 0;
+int totalPositions = 0;
+ulong trackedPositions[];
+double trackedSL[];
+double trackedTP[];
+datetime lastMessageTime = 0;
+int messageCount = 0;
+
+// Structure for tracking position data
+struct PositionData
+{
+    ulong ticket;
+    string symbol;
+    double volume;
+    double openPrice;
+    double sl;
+    double tp;
+    ENUM_POSITION_TYPE type;
+    datetime openTime;
+};
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    if(DiscordWebhookURL == "")
+    {
+        Alert("❌ Discord Webhook URL is required!");
+        return INIT_FAILED;
+    }
+    
+    // Validate webhook URL format
+    if(StringFind(DiscordWebhookURL, "discord.com/api/webhooks/") == -1)
+    {
+        Alert("❌ Invalid Discord Webhook URL format!");
+        return INIT_FAILED;
+    }
+    
+    // Initialize daily tracking
+    dayStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+    lastSummaryDate = TimeCurrent();
+    
+    // Get current positions for tracking
+    InitializePositionTracking();
+    
+    Print("✅ Enhanced MT5 Discord Tracker initialized successfully");
+    
+    // Send startup message
+    string startMessage = "**MT5 Trade Tracker Started**\n";
+
+    SendDiscordMessage(startMessage);
+    
+    return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+    string stopMessage = "**MT5 Trade Tracker Stopped**\n";
+    
+    stopMessage += "**Reason:** " + GetUninitReasonText(reason) + "\n";
+    stopMessage += "**Messages Sent:** " + IntegerToString(messageCount) + "\n";
+    stopMessage += "**Runtime:** " + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS)+ "\n";
+    stopMessage += "-----------------------------\n";
+    SendDiscordMessage(stopMessage);
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+    static datetime lastCheck = 0;
+    
+    // Throttle checks to prevent spam (check every second)
+    if(TimeCurrent() - lastCheck < 1) return;
+    lastCheck = TimeCurrent();
+    
+    CheckNewPositions();
+    CheckPositionModifications();
+    CheckClosedPositions();
+    CheckDailySummary();
+}
+
+//+------------------------------------------------------------------+
+//| Initialize position tracking arrays                              |
+//+------------------------------------------------------------------+
+void InitializePositionTracking()
+{
+    int positions = PositionsTotal();
+    ArrayResize(trackedPositions, positions);
+    ArrayResize(trackedSL, positions);
+    ArrayResize(trackedTP, positions);
+    
+    totalPositions = 0;
+    
+    for(int i = 0; i < positions; i++)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket > 0 && PositionSelectByTicket(ticket))
+        {
+            trackedPositions[totalPositions] = ticket;
+            trackedSL[totalPositions] = PositionGetDouble(POSITION_SL);
+            trackedTP[totalPositions] = PositionGetDouble(POSITION_TP);
+            totalPositions++;
+        }
+    }
+    
+    ArrayResize(trackedPositions, totalPositions);
+    ArrayResize(trackedSL, totalPositions);
+    ArrayResize(trackedTP, totalPositions);
+}
+
+//+------------------------------------------------------------------+
+//| Check for new positions                                          |
+//+------------------------------------------------------------------+
+void CheckNewPositions()
+{
+    int currentPositions = PositionsTotal();
+    
+    if(currentPositions > totalPositions)
+    {
+        // Find new positions
+        for(int i = 0; i < currentPositions; i++)
+        {
+            ulong ticket = PositionGetTicket(i);
+            if(ticket > 0 && PositionSelectByTicket(ticket))
+            {
+                // Check if this is a new position
+                bool isNew = true;
+                for(int j = 0; j < totalPositions; j++)
+                {
+                    if(trackedPositions[j] == ticket)
+                    {
+                        isNew = false;
+                        break;
+                    }
+                }
+                
+                if(isNew && EnableTradeAlerts)
+                {
+                    SendTradeOpenAlert(ticket);
+                    if(EnableSounds) PlaySound("alert.wav");
+                    Sleep(500); // Small delay to prevent rapid-fire alerts
+                }
+            }
+        }
+        
+        // Update tracking arrays
+        InitializePositionTracking();
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Check for position modifications                                 |
+//+------------------------------------------------------------------+
+void CheckPositionModifications()
+{
+    if(!EnableModifyAlerts) return;
+    
+    for(int i = 0; i < totalPositions; i++)
+    {
+        if(PositionSelectByTicket(trackedPositions[i]))
+        {
+            double currentSL = PositionGetDouble(POSITION_SL);
+            double currentTP = PositionGetDouble(POSITION_TP);
+            string symbol = PositionGetString(POSITION_SYMBOL);
+            int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+            
+            bool slChanged = MathAbs(currentSL - trackedSL[i]) > SymbolInfoDouble(symbol, SYMBOL_POINT);
+            bool tpChanged = MathAbs(currentTP - trackedTP[i]) > SymbolInfoDouble(symbol, SYMBOL_POINT);
+            
+            if(slChanged || tpChanged)
+            {
+                SendPositionModifyAlert(trackedPositions[i], trackedSL[i], trackedTP[i], currentSL, currentTP);
+                trackedSL[i] = currentSL;
+                trackedTP[i] = currentTP;
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Check for closed positions                                       |
+//+------------------------------------------------------------------+
+void CheckClosedPositions()
+{
+    int currentPositions = PositionsTotal();
+    
+    if(currentPositions < totalPositions)
+    {
+        // Check recent history for closed trades
+        datetime fromTime = TimeCurrent() - 300; // Last 5 minutes
+        if(HistorySelect(fromTime, TimeCurrent()))
+        {
+            int deals = HistoryDealsTotal();
+            for(int i = deals - 1; i >= 0; i--)
+            {
+                ulong dealTicket = HistoryDealGetTicket(i);
+                if(dealTicket > 0)
+                {
+                    ENUM_DEAL_ENTRY dealEntry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+                    datetime dealTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+                    
+                    // Only process recent exit deals
+                    if(dealEntry == DEAL_ENTRY_OUT && dealTime > TimeCurrent() - 60 && EnableTradeAlerts)
+                    {
+                        SendTradeCloseAlert(dealTicket);
+                        if(EnableSounds) 
+                        {
+                            double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+                            if(profit > 0)
+                                PlaySound("ok.wav");
+                            else
+                                PlaySound("timeout.wav");
+                        }
+                        Sleep(500); // Prevent spam
+                    }
+                }
+            }
+        }
+        
+        // Update tracking
+        InitializePositionTracking();
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Send trade open alert                                            |
+//+------------------------------------------------------------------+
+void SendTradeOpenAlert(ulong ticket)
+{
+    if(!PositionSelectByTicket(ticket)) return;
+    
+    string symbol = PositionGetString(POSITION_SYMBOL);
+    ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    double volume = PositionGetDouble(POSITION_VOLUME);
+    double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+    double sl = PositionGetDouble(POSITION_SL);
+    double tp = PositionGetDouble(POSITION_TP);
+    datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    
+    string typeStr = (type == POSITION_TYPE_BUY) ? "**BUY**" : "**SELL**";
+    
+    
+    string message =" **NEW POSITION OPENED**\n";
+    message += "**Symbol:** " + symbol + "\n";
+    message += "**Type:** " + typeStr + "\n";
+    message += "**Volume:** " + DoubleToString(volume, 2) + "\n";
+    message += "**Open Price:** " + DoubleToString(openPrice, digits) + "\n";
+
+    
+    if(sl > 0)
+        message += "**Stop Loss:** " + DoubleToString(sl, digits) + "\n";
+    else
+        message += "**Stop Loss:** 0.00\n";
+        
+    if(tp > 0)
+        message += "**Take Profit:** " + DoubleToString(tp, digits) + "\n";
+    else
+        message += "**Take Profit:** 0.00\n";
+        
+    message += "**Ticket:** " + IntegerToString(ticket)+ "\n";
+        message += "-----------------------------\n";
+    
+    SendDiscordMessage(message);
+}
+
+//+------------------------------------------------------------------+
+//| Send position modify alert                                        |
+//+------------------------------------------------------------------+
+void SendPositionModifyAlert(ulong ticket, double oldSL, double oldTP, double newSL, double newTP)
+{
+    if(!PositionSelectByTicket(ticket)) return;
+    
+    string symbol = PositionGetString(POSITION_SYMBOL);
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    
+    string message = "**POSITION MODIFIED**\n";
+    
+    message += "**Symbol:** " + symbol + "\n";
+    
+    if(MathAbs(newSL - oldSL) > SymbolInfoDouble(symbol, SYMBOL_POINT))
+    {
+        string slLine = "**Stop Loss:** ";
+        if(oldSL > 0) slLine += DoubleToString(oldSL, digits);
+        else slLine += "0.00";
+        slLine += " → ";
+        if(newSL > 0) slLine += DoubleToString(newSL, digits);
+        else slLine += "0.00";
+        message += slLine + "\n";
+    }
+    
+    if(MathAbs(newTP - oldTP) > SymbolInfoDouble(symbol, SYMBOL_POINT))
+    {
+        string tpLine = "**Take Profit:** ";
+        if(oldTP > 0) tpLine += DoubleToString(oldTP, digits);
+        else tpLine += "0.00";
+        tpLine += " → ";
+        if(newTP > 0) tpLine += DoubleToString(newTP, digits);
+        else tpLine += "0.00";
+        message += tpLine + "\n";
+    }
+    
+    message += "**Ticket:** " + IntegerToString(ticket)+ "\n";
+    message += "-----------------------------\n";
+    
+    SendDiscordMessage(message);
+}
+
+//+------------------------------------------------------------------+
+//| Send trade close alert                                           |
+//+------------------------------------------------------------------+
+void SendTradeCloseAlert(ulong dealTicket)
+{
+    string symbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+    double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+    double volume = HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
+    double price = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+    ENUM_DEAL_REASON reason = (ENUM_DEAL_REASON)HistoryDealGetInteger(dealTicket, DEAL_REASON);
+    datetime closeTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    
+ 
+    string reasonStr = "";
+    
+    
+    if(reason == DEAL_REASON_SL)
+    {
+       
+        reasonStr = " (Stop Loss Hit)";
+        
+    }
+    else if(reason == DEAL_REASON_TP)
+    {
+     
+        reasonStr = " (Take Profit Hit)";
+     
+    }
+
+    
+   
+    string profitText = (profit >= 0) ? "Profit: $+" : "Loss: $-";
+    
+    string message =" **TRADE CLOSED**" + reasonStr + "\n";
+    
+    message += "**Symbol:** " + symbol + "\n";
+    message += "**Volume:** " + DoubleToString(volume, 2) + "\n";
+    message += "**Close Price:** " + DoubleToString(price, digits) + "\n";
+    message += " **" + profitText + DoubleToString(MathAbs(profit), 2) + "\n";
+    message += "**Time:** " + TimeToString(closeTime, TIME_SECONDS) + "\n";
+    message += "**Deal:** " + IntegerToString(dealTicket) + "\n";
+    message += " **Status:" + ((profit >= 0) ? "PROFITABLE" : "LOSS")+ "\n";
+    message += "-----------------------------\n";
+    
+    SendDiscordMessage(message);
+}
+
+//+------------------------------------------------------------------+
+//| Check for daily summary                                          |
+//+------------------------------------------------------------------+
+void CheckDailySummary()
+{
+    if(!EnableDailySummary) return;
+    
+    MqlDateTime currentTime, lastSummary;
+    TimeToStruct(TimeCurrent(), currentTime);
+    TimeToStruct(lastSummaryDate, lastSummary);
+    
+    // Parse summary time
+    string timeParts[];
+    StringSplit(SummaryTime, StringGetCharacter(":", 0), timeParts);
+    int summaryHour = (int)StringToInteger(timeParts[0]);
+    int summaryMinute = (int)StringToInteger(timeParts[1]);
+    
+    if(currentTime.day != lastSummary.day && 
+       currentTime.hour >= summaryHour && 
+       currentTime.min >= summaryMinute)
+    {
+        SendDailySummary();
+        lastSummaryDate = TimeCurrent();
+        dayStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Send daily summary                                               |
+//+------------------------------------------------------------------+
+void SendDailySummary()
+{
+    double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double dailyPL = currentBalance - dayStartBalance;
+    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+    double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+    
+    // Get daily statistics from history
+    datetime dayStart = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
+    HistorySelect(dayStart, TimeCurrent());
+    
+    int totalTrades = 0;
+    int winningTrades = 0;
+    int losingTrades = 0;
+    double totalProfit = 0;
+    double bestTrade = 0;
+    double worstTrade = 0;
+    
+    int deals = HistoryDealsTotal();
+    for(int i = 0; i < deals; i++)
+    {
+        ulong dealTicket = HistoryDealGetTicket(i);
+        if(dealTicket > 0)
+        {
+            ENUM_DEAL_ENTRY dealEntry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+            if(dealEntry == DEAL_ENTRY_OUT)
+            {
+                double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+                totalProfit += profit;
+                totalTrades++;
+                
+                if(profit > 0) winningTrades++;
+                else if(profit < 0) losingTrades++;
+                
+                if(profit > bestTrade) bestTrade = profit;
+                if(profit < worstTrade) worstTrade = profit;
+            }
+        }
+    }
+    
+ 
+    string message = " **DAILY TRADING SUMMARY**\n";
+
+    message += "**Date:** " + TimeToString(TimeCurrent(), TIME_DATE) + "\n\n";
+    
+    message +=  " **Performance Overview:**\n";
+    message +=  " Daily P/L: " +  " $" + DoubleToString(dailyPL, 2) + "\n";
+    message += " Balance: $" + DoubleToString(currentBalance, 2) + "\n";
+    message += " Equity: $" + DoubleToString(equity, 2) + "\n";
+    message += " Free Margin: $" + DoubleToString(freeMargin, 2) + "\n";
+    if(marginLevel > 0) message += " Margin Level: " + DoubleToString(marginLevel, 2) + "%\n";
+    message += "\n";
+    
+    message += "**Trading Statistics:**\n";
+    message += "Total Trades: " + IntegerToString(totalTrades) + "\n";
+    message += "Winning Trades: " + IntegerToString(winningTrades) + "\n";
+    message += "Losing Trades: " + IntegerToString(losingTrades) + "\n";
+    
+    if(totalTrades > 0)
+    {
+        double winRate = (double)winningTrades / totalTrades * 100;
+        message += " Win Rate: " + DoubleToString(winRate, 1) + "%\n";
+        message += " Best Trade: $" + DoubleToString(bestTrade, 2) + "\n";
+        message += " Worst Trade: $" + DoubleToString(worstTrade, 2) + "\n";
+    }
+    
+    message += "\n**Current Status:**\n";
+    message += " Active Positions: " + IntegerToString(PositionsTotal()) + "\n";
+    message += " Messages Sent: " + IntegerToString(messageCount);
+    message += "--------------------\n";
+    SendDiscordMessage(message);
+}
+
+//+------------------------------------------------------------------+
+//| Send message to Discord with retry logic                         |
+//+------------------------------------------------------------------+
+void SendDiscordMessage(string message)
+{
+    string headers = "Content-Type: application/json\r\n";
+    headers += "User-Agent: MT5-Discord-Tracker/2.0\r\n";
+    
+    // Rate limiting check
+    if(TimeCurrent() - lastMessageTime < 1) 
+    {
+        Sleep(1000); // Wait 1 second between messages
+    }
+    lastMessageTime = TimeCurrent();
+    
+    // Escape special characters for JSON
+    string escapedMessage = EscapeJsonString(message);
+    string escapedBotName = EscapeJsonString(BotName);
+    
+    // Create JSON payload
+    string json = "{";
+    json += "\"username\":\"" + escapedBotName + "\",";
+    json += "\"content\":\"" + escapedMessage + "\"";
+    json += "}";
+    
+    char data[];
+    StringToCharArray(json, data, 0, StringLen(json));
+    
+    bool success = false;
+    int attempts = 0;
+    
+    while(!success && attempts < MessageRetryAttempts)
+    {
+        attempts++;
+        
+        char result[];
+        string resultHeaders;
+        int timeout = 10000; // 10 second timeout
+        
+        int res = WebRequest("POST", DiscordWebhookURL, headers, timeout, data, result, resultHeaders);
+        
+        if(res == 200 || res == 204)
+        {
+            success = true;
+            messageCount++;
+            Print("✅ Discord message sent successfully (attempt ", attempts, ")");
+        }
+        else if(res == -1)
+        {
+            int lastError = GetLastError();
+            Print("❌ Discord webhook error (attempt ", attempts, "): Code ", lastError);
+            if(attempts < MessageRetryAttempts) Sleep(2000 * attempts); // Exponential backoff
+        }
+        else if(res == 429) // Rate limited
+        {
+            Print("⚠️ Rate limited by Discord (attempt ", attempts, "), waiting...");
+            Sleep(5000); // Wait 5 seconds for rate limit
+        }
+        else
+        {
+            Print("❌ Discord HTTP error (attempt ", attempts, "): ", res);
+            Print("Response: ", CharArrayToString(result));
+            if(attempts < MessageRetryAttempts) Sleep(1000 * attempts);
+        }
+    }
+    
+    if(!success)
+    {
+        Print("❌ Failed to send Discord message after ", MessageRetryAttempts, " attempts");
+        Print("JSON payload length: ", StringLen(json));
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Escape special characters for JSON                              |
+//+------------------------------------------------------------------+
+string EscapeJsonString(string inputStr)
+{
+    string output = inputStr;
+    
+    // Replace in specific order to avoid double-escaping
+    StringReplace(output, "\\", "\\\\");
+    StringReplace(output, "\"", "\\\"");
+    StringReplace(output, "\n", "\\n");
+    StringReplace(output, "\r", "\\r");
+    StringReplace(output, "\t", "\\t");
+    StringReplace(output, "\b", "\\b");
+    StringReplace(output, "\f", "\\f");
+    
+    return output;
+}
+
+//+------------------------------------------------------------------+
+//| Get uninitialization reason text                                 |
+//+------------------------------------------------------------------+
+string GetUninitReasonText(int reason)
+{
+    switch(reason)
+    {
+        case REASON_PROGRAM: return "EA stopped by user";
+        case REASON_REMOVE: return "EA removed from chart";
+        case REASON_RECOMPILE: return "EA recompiled";
+        case REASON_CHARTCHANGE: return "Chart symbol/period changed";
+        case REASON_CHARTCLOSE: return "Chart closed";
+        case REASON_PARAMETERS: return "EA parameters changed";
+        case REASON_ACCOUNT: return "Account changed";
+        case REASON_TEMPLATE: return "Template changed";
+        case REASON_INITFAILED: return "Initialization failed";
+        case REASON_CLOSE: return "Terminal closed";
+        default: return "Unknown reason (" + IntegerToString(reason) + ")";
+    }
+}
