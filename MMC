@@ -1,0 +1,69 @@
+//@version=5
+indicator("Market Maker Strategy Visual Tool (OBs in Killzones, FVG Fixed)", overlay=true, max_bars_back=500)
+
+// === INPUTS === //
+showFVG = input.bool(true, "Show Fair Value Gaps")
+showOB = input.bool(true, "Show Order Blocks (Killzones Only)")
+showBoS = input.bool(true, "Show Break of Structure")
+showSweeps = input.bool(true, "Show Liquidity Sweeps")
+showKillzones = input.bool(true, "Show Killzones")
+
+// === TIME MANAGEMENT === //
+londonOpenHour = 7  // UTC
+londonCloseHour = 10
+nyOpenHour = 13
+nyCloseHour = 17
+
+inLondon = (hour >= londonOpenHour and hour < londonCloseHour)
+inNY     = (hour >= nyOpenHour and hour < nyCloseHour)
+inKillzone = inLondon or inNY
+
+// === STRUCTURE TRACKING === //
+bosHigh = high > high[1] and high[1] > high[2]
+bosLow = low < low[1] and low[1] < low[2]
+
+plotshape(showBoS and bosHigh, location=location.abovebar, color=color.green, style=shape.triangleup, size=size.tiny, title="BoS Up")
+plotshape(showBoS and bosLow, location=location.belowbar, color=color.red, style=shape.triangledown, size=size.tiny, title="BoS Down")
+
+// === SWEEPS DETECTION === //
+liqSweepHigh = high > ta.highest(high, 20)[1]
+liqSweepLow = low < ta.lowest(low, 20)[1]
+
+plotshape(showSweeps and liqSweepHigh, title="Liquidity Sweep High", location=location.abovebar, color=color.fuchsia, style=shape.xcross, size=size.small)
+plotshape(showSweeps and liqSweepLow, title="Liquidity Sweep Low", location=location.belowbar, color=color.aqua, style=shape.xcross, size=size.small)
+
+// === ORDER BLOCK DETECTION (Only in Killzones) === //
+isBullOB = close[1] < open[1] and close > high[1]
+isBearOB = close[1] > open[1] and close < low[1]
+
+plotshape(showOB and inKillzone and isBullOB, title="Bullish OB", location=location.belowbar, color=color.lime, style=shape.square, size=size.small)
+plotshape(showOB and inKillzone and isBearOB, title="Bearish OB", location=location.abovebar, color=color.orange, style=shape.square, size=size.small)
+
+// === FAIR VALUE GAPS (FIXED SYNTAX) === //
+var box[] fvgBoxes = array.new<box>()
+
+gapUp = low > high[2]
+gapDown = high < low[2]
+
+// Clean up old boxes
+if bar_index % 10 == 0 and array.size(fvgBoxes) > 50
+    box.delete(array.shift(fvgBoxes))
+
+if showFVG and gapUp
+    array.push(fvgBoxes, box.new(bar_index[2], low, bar_index, high[2], border_color=color.green, bgcolor=color.new(color.green, 85)))
+
+if showFVG and gapDown
+    array.push(fvgBoxes, box.new(bar_index[2], high, bar_index, low[2], border_color=color.red, bgcolor=color.new(color.red, 85)))
+
+// === KILLZONE BACKGROUNDS === //
+bgcolor(showKillzones and inLondon ? color.new(color.teal, 90) : na)
+bgcolor(showKillzones and inNY ? color.new(color.blue, 90) : na)
+
+// === STRONG SETUP LABELS === //
+strongEntry = liqSweepLow and bosHigh and isBullOB and inKillzone
+if strongEntry
+    label.new(bar_index, low, "BUY ZONE", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+
+strongSell = liqSweepHigh and bosLow and isBearOB and inKillzone
+if strongSell
+    label.new(bar_index, high, "SELL ZONE", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
