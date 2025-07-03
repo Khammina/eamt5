@@ -1,0 +1,78 @@
+//@version=5
+indicator("Easy Money PRO V.2", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// === Moving Averages ===
+ma1 = ta.sma(close, 21)
+EMA5 = ta.ema(close, 5)
+EMA50 = ta.ema(close, 50)
+EMA100 = ta.ema(close, 100)
+EMA200 = ta.ema(close, 200)
+
+// === Envelope (no plot) ===
+EnH = ta.sma(high, 62)
+EnC = ta.sma(close, 62)
+EnL = ta.sma(low, 62)
+
+// === Signal Logic ===
+bullish = ta.crossover(EMA5[1], EnH[1])
+bearish = ta.crossunder(EMA5[1], EnL[1])
+exit_buy = ta.crossunder(EMA5[1], ma1[1])
+exit_sell = ta.crossover(EMA5[1], ma1[1])
+
+// === Position Flags ===
+var bool in_long = false
+var bool in_short = false
+var float long_entry = na
+var float short_entry = na
+var int long_entry_bar = na
+var int short_entry_bar = na
+
+// === Entry Conditions ===
+if bullish and not in_long
+    in_long := true
+    in_short := false
+    long_entry := open
+    long_entry_bar := bar_index
+
+if bearish and not in_short
+    in_short := true
+    in_long := false
+    short_entry := open
+    short_entry_bar := bar_index
+
+// === Exit Conditions ===
+if exit_buy and in_long
+    in_long := false
+    long_entry := na
+    long_entry_bar := na
+
+if exit_sell and in_short
+    in_short := false
+    short_entry := na
+    short_entry_bar := na
+
+// === Signal Markers ===
+plotshape(bullish ? open : na, title="Buy Signal", style=shape.triangleup, size=size.normal, location=location.belowbar, color=color.green)
+plotshape(bearish ? open : na, title="Sell Signal", style=shape.triangledown, size=size.normal, location=location.abovebar, color=color.red)
+
+// === Entry / SL / TP Visualization ===
+if bullish
+    tp_price = open + 10.0  // 1000 points above entry
+    emt = line.new(bar_index - 1, open, bar_index + 10, open, style=line.style_solid, color=color.green, width=2)
+    sl = line.new(bar_index - 1, EnL, bar_index + 10, EnL, style=line.style_dashed, color=color.red)
+    tp = line.new(bar_index - 1, tp_price, bar_index + 10, tp_price, style=line.style_dashed, color=color.green)
+    linefill.new(emt, sl, color=color.new(color.red, 85))
+    linefill.new(emt, tp, color=color.new(color.green, 85))
+
+if bearish
+    tp_price = open - 10.0  // 1000 points below entry
+    emt = line.new(bar_index - 1, open, bar_index + 10, open, style=line.style_solid, color=color.red, width=2)
+    sl = line.new(bar_index - 1, EnH, bar_index + 10, EnH, style=line.style_dashed, color=color.red)
+    tp = line.new(bar_index - 1, tp_price, bar_index + 10, tp_price, style=line.style_dashed, color=color.green)
+    linefill.new(emt, sl, color=color.new(color.red, 85))
+    linefill.new(emt, tp, color=color.new(color.green, 85))
+
+// === Plot EMAs ===
+plot(EMA50, "EMA50", color=color.orange, linewidth=1)
+plot(EMA100, "EMA100", color=color.purple, linewidth=1)
+plot(EMA200, "EMA200", color=color.fuchsia, linewidth=1)
