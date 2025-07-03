@@ -1,0 +1,154 @@
+//@version=6
+indicator("Advanced Scalping Master", shorttitle="ASM", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// ==================== INPUT PARAMETERS ====================
+// EMA Settings
+emaFast = input.int(8, "Fast EMA", minval=1, group="Moving Averages")
+emaSlow = input.int(21, "Slow EMA", minval=1, group="Moving Averages")
+showEMA = input.bool(true, "Show EMAs", group="Moving Averages")
+
+// RSI Settings
+rsiLength = input.int(14, "RSI Length", minval=1, group="RSI")
+rsiOverbought = input.int(70, "RSI Overbought", minval=50, maxval=100, group="RSI")
+rsiOversold = input.int(30, "RSI Oversold", minval=0, maxval=50, group="RSI")
+showRSI = input.bool(true, "Show RSI Signals", group="RSI")
+
+// MACD Settings
+macdFast = input.int(12, "MACD Fast", minval=1, group="MACD")
+macdSlow = input.int(26, "MACD Slow", minval=1, group="MACD")
+macdSignal = input.int(9, "MACD Signal", minval=1, group="MACD")
+showMACD = input.bool(true, "Show MACD Signals", group="MACD")
+
+// Bollinger Bands Settings
+bbLength = input.int(20, "BB Length", minval=1, group="Bollinger Bands")
+bbMultiplier = input.float(2.0, "BB Multiplier", minval=0.1, group="Bollinger Bands")
+showBB = input.bool(true, "Show Bollinger Bands", group="Bollinger Bands")
+
+// Stochastic Settings
+stochK = input.int(14, "Stoch %K", minval=1, group="Stochastic")
+stochD = input.int(3, "Stoch %D", minval=1, group="Stochastic")
+stochSmooth = input.int(3, "Stoch Smooth", minval=1, group="Stochastic")
+showStoch = input.bool(true, "Show Stochastic Signals", group="Stochastic")
+
+// Volume Settings
+volMaLength = input.int(20, "Volume MA Length", minval=1, group="Volume")
+volMultiplier = input.float(1.5, "Volume Spike Multiplier", minval=1.0, group="Volume")
+showVolume = input.bool(true, "Show Volume Signals", group="Volume")
+
+// Signal Settings
+showBuySignals = input.bool(true, "Show Buy Signals", group="Signals")
+showSellSignals = input.bool(true, "Show Sell Signals", group="Signals")
+showAlerts = input.bool(true, "Enable Alerts", group="Signals")
+
+// Support/Resistance Settings
+srLookback = input.int(10, "S/R Lookback", minval=5, maxval=50, group="Support/Resistance")
+showSR = input.bool(true, "Show Support/Resistance", group="Support/Resistance")
+
+// ==================== CALCULATIONS ====================
+ema8 = ta.ema(close, emaFast)
+ema21 = ta.ema(close, emaSlow)
+emaBullish = ema8 > ema21
+emaBearish = ema8 < ema21
+
+rsi = ta.rsi(close, rsiLength)
+rsiOverboughtLevel = rsi > rsiOverbought
+rsiOversoldLevel = rsi < rsiOversold
+
+[macdLine, signalLine, histLine] = ta.macd(close, macdFast, macdSlow, macdSignal)
+macdBullish = macdLine > signalLine and histLine > histLine[1]
+macdBearish = macdLine < signalLine and histLine < histLine[1]
+
+bbBasis = ta.sma(close, bbLength)
+bbDev = bbMultiplier * ta.stdev(close, bbLength)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+bbSqueeze = (bbUpper - bbLower) / bbBasis < 0.1
+nearBBUpper = close > bbUpper * 0.98
+nearBBLower = close < bbLower * 1.02
+
+k = ta.stoch(close, high, low, stochK)
+d = ta.sma(k, stochD)
+stochOverbought = k > 80 and d > 80
+stochOversold = k < 20 and d < 20
+stochBullCross = ta.crossover(k, d) and k < 50
+stochBearCross = ta.crossunder(k, d) and k > 50
+
+volMA = ta.sma(volume, volMaLength)
+highVolume = volume > volMA * volMultiplier
+lowVolume = volume < volMA * 0.5
+
+bullishCandle = close > open
+bearishCandle = close < open
+doji = math.abs(close - open) <= (high - low) * 0.1
+hammer = (high - low) > 3 * math.abs(close - open) and (close - low) / (high - low) > 0.6
+shootingStar = (high - low) > 3 * math.abs(close - open) and (high - close) / (high - low) > 0.6
+
+highestHigh = ta.highest(high, srLookback)
+lowestLow = ta.lowest(low, srLookback)
+resistance = ta.valuewhen(high == highestHigh, high, 0)
+support = ta.valuewhen(low == lowestLow, low, 0)
+
+trendStrength = math.abs(ema8 - ema21) / close * 100
+strongTrend = trendStrength > 0.5
+
+bullishSignal = emaBullish and rsiOversoldLevel and macdBullish and (nearBBLower or stochOversold) and highVolume and (bullishCandle or hammer) and close > support * 0.999
+bearishSignal = emaBearish and rsiOverboughtLevel and macdBearish and (nearBBUpper or stochOverbought) and highVolume and (bearishCandle or shootingStar) and close < resistance * 1.001
+strongBullish = bullishSignal and stochBullCross and strongTrend
+strongBearish = bearishSignal and stochBearCross and strongTrend
+quickBuy = ta.crossover(close, ema8) and rsi > 40 and rsi < 60 and highVolume and bullishCandle
+quickSell = ta.crossunder(close, ema8) and rsi > 40 and rsi < 60 and highVolume and bearishCandle
+
+// ==================== PLOTTING ====================
+plot(showEMA ? ema8 : na, "Fast EMA", color=color.blue, linewidth=2)
+plot(showEMA ? ema21 : na, "Slow EMA", color=color.red, linewidth=2)
+
+bbUpperPlot = plot(showBB ? bbUpper : na, "BB Upper", color=color.gray, linewidth=1)
+bbLowerPlot = plot(showBB ? bbLower : na, "BB Lower", color=color.gray, linewidth=1)
+bbBasisPlot = plot(showBB ? bbBasis : na, "BB Basis", color=color.orange, linewidth=1)
+fill(bbUpperPlot, bbLowerPlot, color=color.new(color.gray, 95), title="BB Fill")
+
+plot(showSR ? support : na, "Support", color=color.green, linewidth=1, style=plot.style_stepline)
+plot(showSR ? resistance : na, "Resistance", color=color.red, linewidth=1, style=plot.style_stepline)
+
+// ==================== SIGNAL SHAPES ====================
+plotshape(showBuySignals and strongBullish, title="Strong Buy", location=location.belowbar, style=shape.labelup, size=size.normal, color=color.new(color.green, 0), textcolor=color.white, text="STRONG BUY")
+plotshape(showSellSignals and strongBearish, title="Strong Sell", location=location.abovebar, style=shape.labeldown, size=size.normal, color=color.new(color.red, 0), textcolor=color.white, text="STRONG SELL")
+plotshape(showBuySignals and bullishSignal and not strongBullish, title="Buy Signal", location=location.belowbar, style=shape.triangleup, size=size.small, color=color.new(color.lime, 0))
+plotshape(showSellSignals and bearishSignal and not strongBearish, title="Sell Signal", location=location.abovebar, style=shape.triangledown, size=size.small, color=color.new(color.orange, 0))
+plotshape(showBuySignals and quickBuy and not bullishSignal, title="Quick Buy", location=location.belowbar, style=shape.circle, size=size.tiny, color=color.new(color.aqua, 30))
+plotshape(showSellSignals and quickSell and not bearishSignal, title="Quick Sell", location=location.abovebar, style=shape.circle, size=size.tiny, color=color.new(color.fuchsia, 30))
+plotshape(showVolume and highVolume and bullishCandle, title="Volume Spike Up", location=location.bottom, style=shape.square, size=size.tiny, color=color.new(color.yellow, 70))
+plotshape(showVolume and highVolume and bearishCandle, title="Volume Spike Down", location=location.top, style=shape.square, size=size.tiny, color=color.new(color.purple, 70))
+
+// ==================== DASHBOARD ====================
+var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.white, 80), border_width=1, border_color=color.gray)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Indicator", text_color=color.black, text_size=size.small)
+    table.cell(infoTable, 1, 0, "Status", text_color=color.black, text_size=size.small)
+
+    table.cell(infoTable, 0, 1, "Trend", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, emaBullish ? "Bullish" : "Bearish", text_color=emaBullish ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 2, "RSI", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, str.tostring(math.round(rsi, 1)), text_color=color.black, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 3, "MACD", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, macdBullish ? "Bullish" : macdBearish ? "Bearish" : "Neutral", text_color=macdBullish ? color.green : macdBearish ? color.red : color.gray, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 4, "Volume", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 4, highVolume ? "High" : "Normal", text_color=highVolume ? color.green : color.black, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 5, "BB Squeeze", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, bbSqueeze ? "Yes" : "No", text_color=bbSqueeze ? color.orange : color.gray, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 6, "Trend Strength", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 6, str.tostring(math.round(trendStrength, 2)) + "%", text_color=strongTrend ? color.green : color.gray, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 7, "Signal", text_color=color.black, text_size=size.tiny)
+    table.cell(infoTable, 1, 7,
+     strongBullish ? "STRONG BUY" : strongBearish ? "STRONG SELL" :
+     bullishSignal ? "BUY" : bearishSignal ? "SELL" : "WAIT",
+     text_color=strongBullish ? color.green : strongBearish ? color.red :
+                 bullishSignal ? color.lime : bearishSignal ? color.orange : color.black,
+     text_size=size.tiny)
