@@ -6,10 +6,10 @@ indicator("Gold Sniper - V.2", overlay = true, max_lines_count = 500, max_labels
 
 // Input parameters
 trend_mode = input.bool(true, "Trend Mode", tooltip="Enable trend filtering based on SMA100 vs SMA200")
-Zone = input.bool(false, "Zone")
-stoch_sig = input.bool(true, "Stochastic Signals")
-divergen_sig = input.bool(true, "Divergence Signals")
-hidden_sig = input.bool(true, "Hidden Divergence Signals")
+//Zone = input.bool(false, "Zone")
+stoch_sig = true//, "Stochastic Signals")
+divergen_sig = true// "Divergence Signals")
+hidden_sig = true //, "Hidden Divergence Signals")
 
 // Initialize signal variables
 bullish = false
@@ -289,7 +289,7 @@ if hidden_sig == true
 // Plot divergence signals
 plotshape(bullCond ? open : na, title = "Div Buy Signal", style = shape.triangleup, size = size.small, location = location.belowbar, text = "Buy", textcolor = color.green, color = color.lime)
 plotshape(hiddenBullCond ? open : na, title = "Hidden Div Buy Signal", style = shape.triangleup, size = size.small, location = location.belowbar, text = "HDiv", textcolor = color.green, color = color.aqua)
-plotshape(bearCond ? open : na, title = "Div Sell Signal", style = shape.triangledown, size = size.small, location = location.abovebar, text = "Sell", textcolor = color.red, color = color.orange)
+plotshape(bearCond ? open : na, title = "Div Sell Signal", style = shape.triangledown, size = size.small, location = location.abovebar, text = "Sell", textcolor = color.red, color = color.red)
 plotshape(hiddenBearCond ? open : na, title = "Hidden Div Sell Signal", style = shape.triangledown, size = size.small, location = location.abovebar, text = "HDiv", textcolor = color.red, color = color.fuchsia)
 
 // Dashboard settings
