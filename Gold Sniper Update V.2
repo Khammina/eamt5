@@ -1,0 +1,359 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Elitefuns789
+
+//@version=5
+indicator("Gold Sniper - V.2", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// Input parameters
+trend_mode = input.bool(true, "Trend Mode", tooltip="Enable trend filtering based on SMA100 vs SMA200")
+Zone = input.bool(false, "Zone")
+stoch_sig = input.bool(true, "Stochastic Signals")
+divergen_sig = input.bool(true, "Divergence Signals")
+hidden_sig = input.bool(true, "Hidden Divergence Signals")
+
+// Initialize signal variables
+bullish = false
+bearish = false
+
+// TMA Band Parameters
+HalfLength = 56
+string PriceType = "Weighted"
+AtrPeriod = 100
+AtrMultiplier = 2.5
+TMAangle = 4
+
+// TMA Band Variables
+float tmac = na
+float tmau = na
+float tmad = na
+var float pastTmac = na
+var float pastTmau = na
+var float pastTmad = na
+float Tmac = na
+float Tmau = na
+float Tmad = na
+float mac = na
+float mau = na
+float mad = na
+float tmau_temp = na
+float tmac_temp = na
+float tmad_temp = na
+float point = syminfo.pointvalue
+bool last = false
+
+// Colors
+var GRP2 = "Colors"
+var color colorBuffer = na
+color colorBands = input.color(color.new(#ffffff, 0), "Bands", inline = "5", group = GRP2)
+
+// Moving Averages for trend filtering
+sma100 = ta.sma(close, 100)
+sma200 = ta.sma(close, 200)
+
+// Trend conditions
+bullish_trend = sma100 > sma200
+bearish_trend = sma100 < sma200
+price_above_sma200 = close > sma200
+price_below_sma200 = close < sma200
+
+// Clear lines
+a_allLines = line.all
+if array.size(a_allLines) > 0
+    for p = 0 to array.size(a_allLines) - 1
+        line.delete(array.get(a_allLines, p))
+
+// Price function
+Price(x) =>
+    float price = switch PriceType
+        "Close" => close[x]
+        "Open" => open[x]
+        "High" => high[x]
+        "Low" => low[x]
+        "Median" => (high[x] + low[x]) / 2
+        "Typical" => (high[x] + low[x] + close[x]) / 3
+        "Weighted" => (high[x] + low[x] + close[x] + close[x]) / 4
+        "Average" => (high[x] + low[x] + close[x] + open[x])/ 4
+    price
+
+// Main TMA calculation
+for i = HalfLength to 0
+    // ATR calculation
+    atr = 0.0
+    for j = 0 to AtrPeriod - 1
+        atr += math.max(high[i + j + 10], close[i + j + 11]) - math.min(low[i + j + 10], close[i + j + 11])
+    atr /= AtrPeriod
+    
+    // Bands calculation
+    sum = (HalfLength + 1) * Price(i)
+    sumw = (HalfLength + 1)
+    k = HalfLength
+    for j = 1 to HalfLength
+        sum += k * Price(i + j)
+        sumw += k
+        if (j <= i)
+            sum += k * Price(i - j)
+            sumw += k
+        k -= 1
+    tmac := sum/sumw
+    tmau := tmac + AtrMultiplier * atr
+    tmad := tmac - AtrMultiplier * atr
+    
+    if barstate.islast and i == 0
+        mac := tmac
+        mau := tmau
+        mad := tmad
+
+    if barstate.islast and i == HalfLength
+        last := true
+        tmau_temp := tmau
+        tmac_temp := tmac
+        tmad_temp := tmad
+        
+    if barstate.islast and i < HalfLength
+        line.new(bar_index - (i + 1), pastTmau, bar_index - (i), tmau, width = 2, style = line.style_dotted, color = colorBands)
+        line.new(bar_index - (i + 1), pastTmad, bar_index - (i), tmad, width = 2, style = line.style_dotted, color = colorBands)
+
+    pastTmac := tmac
+    pastTmau := tmau
+    pastTmad := tmad
+    
+    if barstate.islast != true
+        break
+
+// Draw bands
+plot(last ? tmau_temp : tmau, title = "TMA Up", linewidth=1, style = plot.style_line, offset = -HalfLength, color = colorBands)
+plot(last ? tmad_temp : tmad, title = "TMA Down", linewidth=1, style = plot.style_line, offset = -HalfLength, color = colorBands)
+
+// Second TMA band with different multiplier
+AtrMultiplier_2 = 4.5
+float tmac_2 = na
+float tmau_2 = na
+float tmad_2 = na
+var float pastTmac_2 = na
+var float pastTmau_2 = na
+var float pastTmad_2 = na
+float Tmac_2 = na
+float Tmau_2 = na
+float Tmad_2 = na
+float mac_2 = na
+float mau_2 = na
+float mad_2 = na
+float tmau_temp_2 = na
+float tmac_temp_2 = na
+float tmad_temp_2 = na
+bool last_2 = false
+
+color colorBands_2 = input.color(color.new(#ffffff, 0), "Out Bands", inline = "5", group = GRP2)
+
+// Second TMA calculation
+for i = HalfLength to 0
+    atr = 0.0
+    for j = 0 to AtrPeriod - 1
+        atr += math.max(high[i + j + 10], close[i + j + 11]) - math.min(low[i + j + 10], close[i + j + 11])
+    atr /= AtrPeriod
+    
+    sum = (HalfLength + 1) * Price(i)
+    sumw = (HalfLength + 1)
+    k = HalfLength
+    for j = 1 to HalfLength
+        sum += k * Price(i + j)
+        sumw += k
+        if (j <= i)
+            sum += k * Price(i - j)
+            sumw += k
+        k -= 1
+    tmac_2 := sum/sumw
+    tmau_2 := tmac_2 + AtrMultiplier_2 * atr
+    tmad_2 := tmac_2 - AtrMultiplier_2 * atr
+    
+    if barstate.islast and i == 0
+        mac_2 := tmac_2
+        mau_2 := tmau_2
+        mad_2 := tmad_2
+
+    if barstate.islast and i == HalfLength
+        last_2 := true
+        tmau_temp_2 := tmau_2
+        tmac_temp_2 := tmac_2
+        tmad_temp_2 := tmad_2
+        
+    if barstate.islast and i < HalfLength
+        line.new(bar_index - (i + 1), pastTmau_2, bar_index - (i), tmau_2, width = 2, style = line.style_dotted, color = colorBands_2)
+        line.new(bar_index - (i + 1), pastTmad_2, bar_index - (i), tmad_2, width = 2, style = line.style_dotted, color = colorBands_2)
+
+    pastTmac_2 := tmac_2
+    pastTmau_2 := tmau_2
+    pastTmad_2 := tmad_2
+    
+    if barstate.islast != true
+        break
+
+plot(last_2 ? tmau_temp_2 : tmau_2, title = "TMA Up 2", linewidth=1, style = plot.style_line, offset = -HalfLength, color = colorBands_2)
+plot(last_2 ? tmad_temp_2 : tmad_2, title = "TMA Down 2", linewidth=1, style = plot.style_line, offset = -HalfLength, color = colorBands_2)
+
+// Technical indicators
+length = 14
+OverBought = 80
+OverSold = 20
+smoothK = 3
+smoothD = 3
+k = ta.sma(ta.stoch(close, high, low, length), smoothK)
+d = ta.sma(k, smoothD)
+
+len = 14
+lensig = 14
+[diplus, diminus, adx] = ta.dmi(len, lensig)
+cci = ta.cci(hlc3, 14)
+ema6 = ta.ema(close, 6)
+stom = ta.stoch(close, 14, 1, 3)
+rsi = ta.rsi(close, 14)
+rsifilter = ta.sma(rsi, 7)
+sma5 = ta.sma(close, 5)
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+
+// Enhanced Stochastic signals with trend filtering
+if stoch_sig == true
+    if trend_mode
+        // Using only price SMA filter for trend mode
+        bullish := (ta.crossover(k[1], d[1]) and rsi[1] < 50 and k[1] < 20 and histLine[1] < -0.5 and bullish_trend and price_above_sma200) ? true : false
+        bearish := (ta.crossunder(k[1], d[1]) and rsi[1] > 50 and k[1] > 80 and histLine[1] > 0.5 and bearish_trend and price_below_sma200) ? true : false
+    else
+        // No trend filtering
+        bullish := (ta.crossover(k[1], d[1]) and rsi[1] < 50 and k[1] < 20 and histLine[1] < -0.5) ? true : false
+        bearish := (ta.crossunder(k[1], d[1]) and rsi[1] > 50 and k[1] > 80 and histLine[1] > 0.5) ? true : false
+
+// Plot stochastic signals
+plotshape(bullish ? open : na, title = "Stoch Buy Signal", style = shape.triangleup, size = size.small, location = location.belowbar, text = "Buy", textcolor = color.green, color = color.green)
+plotshape(bearish ? open : na, title = "Stoch Sell Signal", style = shape.triangledown, size = size.small, location = location.abovebar, text = "Sell", textcolor = color.red, color = color.red)
+
+// Divergence detection
+plotBull = true
+plotBear = true
+plotHiddenBull = false
+plotHiddenBear = false
+
+lbR = 5
+lbL = 5
+osc = ta.rsi(close, 14)
+plFound = na(ta.pivotlow(osc, lbL, lbR)) ? false : true
+phFound = na(ta.pivothigh(osc, lbL, lbR)) ? false : true
+
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    5 <= bars and bars <= 60
+
+// Regular Bullish Divergence
+oscHL = osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
+
+// Hidden Bullish Divergence
+oscLL = osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
+
+// Regular Bearish Divergence
+oscLH = osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
+
+// Hidden Bearish Divergence
+oscHH = osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
+
+// Initialize divergence conditions
+bullCond = false
+hiddenBullCond = false
+bearCond = false
+hiddenBearCond = false
+
+// Enhanced divergence signals with trend filtering
+if divergen_sig == true
+    if trend_mode
+        // Using only price SMA filter for trend mode
+        bullCond := plotBull and priceLL and oscHL and plFound and bullish_trend and price_above_sma200
+        bearCond := plotBear and priceHH and oscLH and phFound and bearish_trend and price_below_sma200
+    else
+        // No trend filtering
+        bullCond := plotBull and priceLL and oscHL and plFound
+        bearCond := plotBear and priceHH and oscLH and phFound
+
+// Enhanced hidden divergence signals with trend filtering
+if hidden_sig == true
+    if trend_mode
+        // Using only price SMA filter for trend mode
+        hiddenBullCond := plotHiddenBull and priceHL and oscLL and plFound and bullish_trend and price_above_sma200
+        hiddenBearCond := plotHiddenBear and priceLH and oscHH and phFound and bearish_trend and price_below_sma200
+    else
+        // No trend filtering
+        hiddenBullCond := plotHiddenBull and priceHL and oscLL and plFound
+        hiddenBearCond := plotHiddenBear and priceLH and oscHH and phFound
+
+// Plot divergence signals
+plotshape(bullCond ? open : na, title = "Div Buy Signal", style = shape.triangleup, size = size.small, location = location.belowbar, text = "Buy", textcolor = color.green, color = color.lime)
+plotshape(hiddenBullCond ? open : na, title = "Hidden Div Buy Signal", style = shape.triangleup, size = size.small, location = location.belowbar, text = "HDiv", textcolor = color.green, color = color.aqua)
+plotshape(bearCond ? open : na, title = "Div Sell Signal", style = shape.triangledown, size = size.small, location = location.abovebar, text = "Sell", textcolor = color.red, color = color.orange)
+plotshape(hiddenBearCond ? open : na, title = "Hidden Div Sell Signal", style = shape.triangledown, size = size.small, location = location.abovebar, text = "HDiv", textcolor = color.red, color = color.fuchsia)
+
+// Dashboard settings
+dash_sty = input.session('Horizontal', "Dashboard Style", options=["Horizontal", "Vertical"], group='Table Settings')
+dash_loc = input.session("Bottom Right", "Dashboard Location", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right", "Bottom Center"], group='Table Settings')
+text_size = input.session('Small', "Dashboard Size", options=["Tiny", "Small", "Normal", "Large"], group='Table Settings')
+cell_transp = input.int(10, 'Cell Transparency', minval=0, maxval=100, group='Table Settings')
+col_H = input.color(color.gray, "Header", inline="0", group='Table Settings')
+Col_txt = input.color(color.white, "Text", inline="0", group='Table Settings')
+
+// Multi-timeframe trend calculation
+sma100_15m = request.security(syminfo.tickerid, '15', ta.sma(close, 100))
+sma200_15m = request.security(syminfo.tickerid, '15', ta.sma(close, 200))
+string trend_15m = (sma100_15m > sma200_15m) ? "Up" : (sma100_15m < sma200_15m) ? "Dw" : "Sw"
+
+sma100_30m = request.security(syminfo.tickerid, '30', ta.sma(close, 100))
+sma200_30m = request.security(syminfo.tickerid, '30', ta.sma(close, 200))
+string trend_30m = (sma100_30m > sma200_30m) ? "Up" : (sma100_30m < sma200_30m) ? "Dw" : "Sw"
+
+sma100_1h = request.security(syminfo.tickerid, '60', ta.sma(close, 100))
+sma200_1h = request.security(syminfo.tickerid, '60', ta.sma(close, 200))
+string trend_1h = (sma100_1h > sma200_1h) ? "Up" : (sma100_1h < sma200_1h) ? "Dw" : "Sw"
+
+sma100_4h = request.security(syminfo.tickerid, '240', ta.sma(close, 100))
+sma200_4h = request.security(syminfo.tickerid, '240', ta.sma(close, 200))
+string trend_4h = (sma100_4h > sma200_4h) ? "Up" : (sma100_4h < sma200_4h) ? "Dw" : "Sw"
+
+// Table creation and positioning
+max = 160
+min = 10
+var table_position = dash_loc == 'Top Left' ? position.top_left :
+  dash_loc == 'Bottom Left' ? position.bottom_left :
+  dash_loc == 'Middle Right' ? position.middle_right :
+  dash_loc == 'Bottom Center' ? position.bottom_center :
+  dash_loc == 'Top Right' ? position.top_right : position.bottom_right
+
+var table_text_size = text_size == 'Tiny' ? size.tiny :
+  text_size == 'Small' ? size.small :
+  text_size == 'Normal' ? size.normal : size.large
+
+var t = table.new(table_position, 15, math.abs(max-min)+2,
+  frame_color = color.new(#000000, 0),
+  frame_width = 1,
+  border_color = color.new(#000000, 0),
+  border_width = 1)
+
+// Table display
+if dash_sty == "Horizontal"
+    table.cell(t, 1, 1, '15m', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    table.cell(t, 2, 1, '30m', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    table.cell(t, 3, 1, '1h', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    table.cell(t, 4, 1, '4h', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    
+    table.cell(t, 1, 2, trend_15m, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_15m=="Up")?color.green:(trend_15m=="Dw")?color.red:color.gray, cell_transp))
+    table.cell(t, 2, 2, trend_30m, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_30m=="Up")?color.green:(trend_30m=="Dw")?color.red:color.gray, cell_transp))
+    table.cell(t, 3, 2, trend_1h, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_1h=="Up")?color.green:(trend_1h=="Dw")?color.red:color.gray, cell_transp))
+    table.cell(t, 4, 2, trend_4h, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_4h=="Up")?color.green:(trend_4h=="Dw")?color.red:color.gray, cell_transp))
+else
+    table.cell(t, 1, 1, '15m', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    table.cell(t, 1, 2, '30m', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    table.cell(t, 1, 3, '1h', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    table.cell(t, 1, 4, '4h', text_color=Col_txt, text_size=table_text_size, bgcolor=color.new(col_H, cell_transp))
+    
+    table.cell(t, 2, 1, trend_15m, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_15m=="Up")?color.green:(trend_15m=="Dw")?color.red:color.gray, cell_transp))
+    table.cell(t, 2, 2, trend_30m, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_30m=="Up")?color.green:(trend_30m=="Dw")?color.red:color.gray, cell_transp))
+    table.cell(t, 2, 3, trend_1h, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_1h=="Up")?color.green:(trend_1h=="Dw")?color.red:color.gray, cell_transp))
+    table.cell(t, 2, 4, trend_4h, text_color=Col_txt, text_size=table_text_size, bgcolor=color.new((trend_4h=="Up")?color.green:(trend_4h=="Dw")?color.red:color.gray, cell_transp))
