@@ -1,0 +1,127 @@
+//@version=5
+indicator("Easy Money PRO V.2", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// === Moving Averages ===
+ma1     = ta.sma(close, 21)
+EMA5    = ta.ema(close, 5)
+EMA50   = ta.ema(close, 50)
+EMA100  = ta.ema(close, 100)
+EMA200  = ta.ema(close, 200)
+
+// === Envelope (no plot) ===
+EnH = ta.sma(high, 62)
+EnC = ta.sma(close, 62)
+EnL = ta.sma(low, 62)
+
+// === Signal Logic ===
+bullish    = ta.crossover(EMA5[1], EnH[1])
+bearish    = ta.crossunder(EMA5[1], EnL[1])
+exit_buy   = ta.crossunder(EMA5[1], ma1[1])
+exit_sell  = ta.crossover(EMA5[1], ma1[1])
+
+// === Position Flags ===
+var bool in_long  = false
+var bool in_short = false
+var float long_entry     = na
+var float short_entry    = na
+var int long_entry_bar   = na
+var int short_entry_bar  = na
+
+// === Entry Price / SL / TP ===
+var float current_entry_price = na
+var float current_sl = na
+var float current_tp = na
+
+// === Entry Conditions ===
+if bullish and not in_long
+    in_long        := true
+    in_short       := false
+    long_entry     := open
+    long_entry_bar := bar_index
+    current_entry_price := open
+    current_sl := EnL
+    current_tp := open + 10.0
+
+if bearish and not in_short
+    in_short        := true
+    in_long         := false
+    short_entry     := open
+    short_entry_bar := bar_index
+    current_entry_price := open
+    current_sl := EnH
+    current_tp := open - 10.0
+
+// === Exit Conditions ===
+if exit_buy and in_long
+    in_long        := false
+    long_entry     := na
+    long_entry_bar := na
+    current_entry_price := na
+    current_sl := na
+    current_tp := na
+
+if exit_sell and in_short
+    in_short        := false
+    short_entry     := na
+    short_entry_bar := na
+    current_entry_price := na
+    current_sl := na
+    current_tp := na
+
+// === Signal Markers ===
+plotshape(bullish ? open : na, title="Buy Signal", style=shape.triangleup, size=size.normal, location=location.belowbar, color=color.green)
+plotshape(bearish ? open : na, title="Sell Signal", style=shape.triangledown, size=size.normal, location=location.abovebar, color=color.red)
+
+// === Entry / SL / TP Visualization ===
+if bullish
+    entry_price = open
+    tp_price    = entry_price + 10.0
+    entry_line = line.new(bar_index - 1, entry_price, bar_index + 10, entry_price, style=line.style_dashed, color=color.rgb(0, 17, 255))
+    sl_line    = line.new(bar_index - 1, EnL, bar_index + 10, EnL, style=line.style_dashed, color=color.red)
+    tp_line    = line.new(bar_index - 1, tp_price, bar_index + 10, tp_price, style=line.style_dashed, color=color.green)
+
+if bearish
+    entry_price = open
+    tp_price    = entry_price - 10.0
+    entry_line = line.new(bar_index - 1, entry_price, bar_index + 10, entry_price, style=line.style_dashed, color=color.rgb(0, 17, 255))
+    sl_line    = line.new(bar_index - 1, EnH, bar_index + 10, EnH, style=line.style_dashed, color=color.red)
+    tp_line    = line.new(bar_index - 1, tp_price, bar_index + 10, tp_price, style=line.style_dashed, color=color.green)
+
+// === Plot EMAs ===
+plot(EMA50,  "EMA50",  color=color.orange, linewidth=1)
+plot(EMA100, "EMA100", color=color.rgb(60, 255, 0), linewidth=1)
+plot(EMA200, "EMA200", color=color.fuchsia, linewidth=1)
+
+// === EMA Trend Summary Table ===
+ema_trend   = EMA50 > EMA100 and EMA100 > EMA200 ? "Bullish" :
+              EMA50 < EMA100 and EMA100 < EMA200 ? "Bearish" : "Mixed"
+
+trend_color = ema_trend == "Bullish" ? color.lime :
+              ema_trend == "Bearish" ? color.red : color.orange
+
+var table emaTable = table.new(position.top_right, 2, 8, border_width=1)
+
+if bar_index % 1 == 0
+    table.cell(emaTable, 0, 0, "EMA", text_color=color.white, bgcolor=color.black)
+    table.cell(emaTable, 1, 0, "Value", text_color=color.white, bgcolor=color.black)
+
+    table.cell(emaTable, 0, 1, "EMA50", text_color=color.orange)
+    table.cell(emaTable, 1, 1, str.tostring(1, "#.##"), text_color=color.orange)
+
+    table.cell(emaTable, 0, 2, "EMA100", text_color=color.rgb(60, 255, 0))
+    table.cell(emaTable, 1, 2, str.tostring(2, "#.##"), text_color=color.rgb(60, 255, 0))
+
+    table.cell(emaTable, 0, 3, "EMA200", text_color=color.fuchsia)
+    table.cell(emaTable, 1, 3, str.tostring(3, "#.##"), text_color=color.fuchsia)
+
+    table.cell(emaTable, 0, 4, "Trend", text_color=color.rgb(255, 255, 255))
+    table.cell(emaTable, 1, 4, ema_trend, text_color=trend_color)
+
+    table.cell(emaTable, 0, 5, "Entry", text_color=color.rgb(0, 17, 255))
+    table.cell(emaTable, 1, 5, na(current_entry_price) ? "-" : str.tostring(current_entry_price, "#.##"), text_color=color.rgb(0, 17, 255))
+
+    table.cell(emaTable, 0, 6, "SL", text_color=color.red)
+    table.cell(emaTable, 1, 6, na(current_sl) ? "-" : str.tostring(current_sl, "#.##"), text_color=color.red)
+
+    table.cell(emaTable, 0, 7, "TP", text_color=color.green)
+    table.cell(emaTable, 1, 7, na(current_tp) ? "-" : str.tostring(current_tp, "#.##"), text_color=color.green)
